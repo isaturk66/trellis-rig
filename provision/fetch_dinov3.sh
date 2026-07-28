@@ -48,12 +48,28 @@ fi
 ls -lh "$PTH"
 
 echo "--- converter deps"
-"$PIP" install -q --upgrade transformers httpx pillow torchvision
+# NOT --upgrade, and constrained. An unconstrained `--upgrade ... torchvision`
+# here resolves to the newest torchvision, which drags in a torch built for a
+# different CUDA. That silently replaces the pinned 2.9.1+cu128, after which
+# transformers' eager torchaudio import raises a CUDA-mismatch RuntimeError
+# and DINOv3ViTModel becomes unimportable — which is exactly how this failed
+# on the first live run.
+"$PIP" install -q -c "$COMFY_DIR/constraints.txt" transformers httpx pillow
 
 echo "--- fetching official converter"
-curl -fsSL -o "$WORK/convert_dinov3_vit_to_hf.py" \
-  https://raw.githubusercontent.com/huggingface/transformers/main/src/transformers/models/dinov3_vit/convert_dinov3_vit_to_hf.py \
-  || { echo "!! could not fetch converter"; exit 1; }
+# Match the converter to the transformers we actually installed. Taking it
+# from main risks it referencing symbols the local version doesn't have yet.
+TFV="$("$PY" -c 'import transformers; print(transformers.__version__)' 2>/dev/null)"
+CONV_PATH=src/transformers/models/dinov3_vit/convert_dinov3_vit_to_hf.py
+for ref in "v${TFV}" main; do
+  echo "    trying ref ${ref}"
+  if curl -fsSL -o "$WORK/convert_dinov3_vit_to_hf.py" \
+      "https://raw.githubusercontent.com/huggingface/transformers/${ref}/${CONV_PATH}"; then
+    echo "    got converter from ${ref}"
+    break
+  fi
+done
+[ -s "$WORK/convert_dinov3_vit_to_hf.py" ] || { echo "!! no converter"; exit 1; }
 
 echo "--- converting (includes numerical verification against reference outputs)"
 cd "$WORK"

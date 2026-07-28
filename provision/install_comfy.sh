@@ -8,6 +8,7 @@ COMFY_DIR=/opt/comfy
 VENV="$COMFY_DIR/venv"
 PY="$VENV/bin/python"
 PIP="$VENV/bin/pip"
+CONSTRAINTS="$COMFY_DIR/constraints.txt"
 
 # Must match the wheels/Linux/<TorchXXX> directory we install from.
 TORCH_VERSION="${TORCH_VERSION:-2.9.1}"
@@ -22,14 +23,31 @@ fi
 "$PIP" install --upgrade pip wheel setuptools -q
 
 echo "--- torch ${TORCH_VERSION} (cu128)"
-"$PIP" install -q "torch==${TORCH_VERSION}" torchvision torchaudio \
+# No torchaudio on purpose. Nothing here needs it, and transformers imports it
+# eagerly via loss_rnnt — so if its CUDA build ever drifts from torch's, every
+# `from transformers import ...` dies with a version-mismatch RuntimeError.
+"$PIP" install -q "torch==${TORCH_VERSION}" torchvision \
   --index-url "$TORCH_INDEX"
+
+# Freeze the torch stack. Any later `pip install --upgrade <anything that
+# depends on torch>` will happily pull a build for a different CUDA and break
+# every compiled wheel above; passing `-c` on subsequent installs makes that
+# impossible rather than merely unlikely.
+"$PY" - > "$CONSTRAINTS" <<'PYPIN'
+import importlib.metadata as md
+for pkg in ("torch", "torchvision"):
+    try:
+        print(f"{pkg}=={md.version(pkg)}")
+    except md.PackageNotFoundError:
+        pass
+PYPIN
+echo "    pinned:"; sed 's/^/      /' "$CONSTRAINTS"
 
 echo "--- comfyui"
 if [ ! -d "$COMFY_DIR/ComfyUI/.git" ]; then
   git clone --depth 1 https://github.com/comfyanonymous/ComfyUI "$COMFY_DIR/ComfyUI"
 fi
-"$PIP" install -q -r "$COMFY_DIR/ComfyUI/requirements.txt"
+"$PIP" install -q -c "$CONSTRAINTS" -r "$COMFY_DIR/ComfyUI/requirements.txt"
 
 echo "--- ComfyUI-Trellis2"
 NODE_DIR="$COMFY_DIR/ComfyUI/custom_nodes/ComfyUI-Trellis2"
@@ -52,7 +70,7 @@ if [ -d "$WHEELS" ]; then
   # "No module named 'trimesh'" without this. Listed explicitly so the torch
   # pin stays untouched.
   echo "--- wheel runtime deps (skipped by --no-deps)"
-  "$PIP" install -q trimesh easydict plyfile zstandard tqdm
+  "$PIP" install -q -c "$CONSTRAINTS" trimesh easydict plyfile zstandard tqdm
 else
   echo "!! no wheel dir at $WHEELS — check available versions:"
   ls "$NODE_DIR/wheels/Linux" || true
@@ -60,7 +78,7 @@ else
 fi
 
 echo "--- node requirements"
-"$PIP" install -q -r "$NODE_DIR/requirements.txt" || \
+"$PIP" install -q -c "$CONSTRAINTS" -r "$NODE_DIR/requirements.txt" || \
   echo "!! some node requirements failed — continuing"
 
 # Wheels pulled their own transitive deps in with --no-deps off in the past;

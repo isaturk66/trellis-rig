@@ -13,7 +13,7 @@ RIG_DIR="${RIG_DIR:-/opt/rig}"
 # huggingface_hub 1.x dropped the hf_transfer extra and deprecated
 # HF_HUB_ENABLE_HF_TRANSFER (the accelerated backend is built in now), so
 # asking for either just prints warnings.
-"$PIP" install -q --upgrade huggingface_hub
+"$PIP" install -q -c "$COMFY_DIR/constraints.txt" --upgrade huggingface_hub
 mkdir -p "$MODELS"
 
 # ---------------------------------------------------------------------------

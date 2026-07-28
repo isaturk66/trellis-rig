@@ -49,6 +49,14 @@ server {
         default_type text/plain;
     }
 
+    # ComfyUI's own stdout. Without this, a ComfyUI that fails to start is
+    # invisible from outside — the Vast instance log only captures onstart.
+    location = /rig/comfy {
+        ${AUTH_BLOCK}
+        alias ${LOG_DIR}/comfy.log;
+        default_type text/plain;
+    }
+
     location / {
         ${AUTH_BLOCK}
         proxy_pass http://127.0.0.1:${COMFY_PORT};
