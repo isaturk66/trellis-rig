@@ -46,6 +46,13 @@ if [ -d "$WHEELS" ]; then
     echo "    $(basename "$whl")"
     "$PIP" install -q --no-deps --force-reinstall "$whl"
   done
+
+  # ...but --no-deps also drops their harmless pure-python requirements, and
+  # nothing else pulls them in: o_voxel dies at import with
+  # "No module named 'trimesh'" without this. Listed explicitly so the torch
+  # pin stays untouched.
+  echo "--- wheel runtime deps (skipped by --no-deps)"
+  "$PIP" install -q trimesh easydict plyfile zstandard tqdm
 else
   echo "!! no wheel dir at $WHEELS — check available versions:"
   ls "$NODE_DIR/wheels/Linux" || true
@@ -69,12 +76,17 @@ if torch.cuda.is_available():
     print(f"    gpu {name} | compute capability {cap[0]}.{cap[1]}")
     if cap[0] < 8:
         print("    !! CC < 8.0 — bf16 unsupported, flow models will fail")
-for mod in ("cumesh", "o_voxel", "flex_gemm", "nvdiffrast"):
+bad = []
+for mod in ("cumesh", "o_voxel", "flex_gemm", "nvdiffrast", "trimesh"):
     try:
         __import__(mod)
         print(f"    ok   {mod}")
     except Exception as exc:
         print(f"    FAIL {mod}: {exc}")
+        bad.append(mod)
+if bad:
+    # Fail loudly here rather than at the first prompt 20 minutes later.
+    raise SystemExit(f"unusable install, broken imports: {', '.join(bad)}")
 PYCHECK
 
 echo "--- workflows"

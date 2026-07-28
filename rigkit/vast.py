@@ -7,6 +7,13 @@ import urllib.request
 
 API_ROOT = "https://console.vast.ai/api/v0"
 
+# Vast is mid-migration. Probed 2026-07-29: creating (PUT /asks/{id}/),
+# destroying, fetching a single instance and requesting logs are all still v0
+# and answer with semantic errors. Only the instance *list* has moved — v0
+# returns HTTP 410 deprecated_endpoint — and v1 has no /bundles/ equivalent,
+# so offer search must stay on v0.
+API_V1 = "https://console.vast.ai/api/v1"
+
 
 class VastError(RuntimeError):
     pass
@@ -44,8 +51,8 @@ class Vast:
         self.key = key or api_key()
         self.timeout = timeout
 
-    def _request(self, method, path, body=None):
-        url = f"{API_ROOT}{path}"
+    def _request(self, method, path, body=None, root=API_ROOT):
+        url = f"{root}{path}"
         data = json.dumps(body).encode("utf-8") if body is not None else None
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Authorization", f"Bearer {self.key}")
@@ -78,7 +85,8 @@ class Vast:
         return self._request("PUT", f"/asks/{offer_id}/", body)
 
     def instances(self):
-        return self._request("GET", "/instances/").get("instances", [])
+        # v0 is retired for this one: HTTP 410 deprecated_endpoint.
+        return self._request("GET", "/instances/", root=API_V1).get("instances", [])
 
     def instance(self, instance_id):
         got = self._request("GET", f"/instances/{instance_id}/")

@@ -49,17 +49,40 @@ def build_query(tier_name, max_dph=None, floor=None):
     return query
 
 
-def rank(offers):
-    """Cheapest first. Vast's own ordering is advisory, so sort locally too."""
-    return sorted(offers, key=lambda o: (o.get("dph_total") or 9e9))
+STORAGE_HOURS_PER_MONTH = 720  # Vast bills storage_cost as $/GB/month
 
 
-def summarize(offer):
+def effective_dph(offer, disk_gb):
+    """True hourly cost for the disk WE ask for.
+
+    An offer's `dph_total` bundles storage for whatever default disk the host
+    advertises — usually tiny. Requesting 120GB on a $0.33/GB/mo host adds
+    $0.055/hr, roughly half again the GPU price. Worse, `storage_cost` varies
+    per host, so sorting on the advertised `dph_total` can rank a genuinely
+    more expensive box first.
+    """
+    base = offer.get("dph_base")
+    if base is None:  # some payloads only carry the bundled figure
+        return offer.get("dph_total") or 9e9
+    storage = (offer.get("storage_cost") or 0) * disk_gb / STORAGE_HOURS_PER_MONTH
+    return base + storage
+
+
+def rank(offers, disk_gb=None):
+    """Cheapest first, priced for the disk we intend to request."""
+    if disk_gb is None:
+        return sorted(offers, key=lambda o: (o.get("dph_total") or 9e9))
+    return sorted(offers, key=lambda o: effective_dph(o, disk_gb))
+
+
+def summarize(offer, disk_gb=None):
     return {
         "id": offer.get("id"),
         "gpu": offer.get("gpu_name"),
         "vram_gb": round((offer.get("gpu_ram") or 0) / 1024),
-        "dph": offer.get("dph_total"),
+        "dph": (effective_dph(offer, disk_gb) if disk_gb
+                else offer.get("dph_total")),
+        "dph_gpu": offer.get("dph_base"),
         "ram_gb": round(offer.get("cpu_ram", 0) / 1024),
         "cpus": offer.get("cpu_cores_effective"),
         "disk_gb": round(offer.get("disk_space") or 0),
@@ -73,33 +96,38 @@ def summarize(offer):
 def build_env(hf_token=None, auth_user=None, auth_pass=None,
               repo=DEFAULT_REPO, branch=DEFAULT_BRANCH, dinov3_url=None,
               extra=None):
-    """Vast wants docker-style flags in a single string.
+    """Build the `env` object for instance creation.
+
+    Vast wants a DICT here, not the docker-flag string the docs show — a
+    string gets a flat `invalid env arguments` 400 regardless of content
+    (verified 2026-07-29: even `-e FOO=bar` is rejected). Port publishing is
+    expressed as a `-p host:container` *key* with a dummy value.
 
     Secrets travel here at launch time from the local environment. They are
     never written into the repo.
     """
-    parts = [
-        f"-p {PROXY_PORT}:{PROXY_PORT}",
-        f"-p {COMFY_PORT}:{COMFY_PORT}",
-        f"-e RIG_REPO={repo}",
-        f"-e RIG_BRANCH={branch}",
-        f"-e RIG_COMFY_PORT={COMFY_PORT}",
-        f"-e RIG_PROXY_PORT={PROXY_PORT}",
-        f"-e OPEN_BUTTON_PORT={PROXY_PORT}",
-    ]
+    env = {
+        f"-p {PROXY_PORT}:{PROXY_PORT}": "1",
+        f"-p {COMFY_PORT}:{COMFY_PORT}": "1",
+        "OPEN_BUTTON_PORT": str(PROXY_PORT),
+        "RIG_REPO": repo,
+        "RIG_BRANCH": branch,
+        "RIG_COMFY_PORT": str(COMFY_PORT),
+        "RIG_PROXY_PORT": str(PROXY_PORT),
+    }
     if hf_token:
-        parts.append(f"-e HF_TOKEN={hf_token}")
+        env["HF_TOKEN"] = hf_token
     if dinov3_url:
-        # base64 so the CloudFront signature's &, = and ~ survive being packed
-        # into a space-separated docker-flag string.
-        packed = base64.b64encode(dinov3_url.strip().encode()).decode()
-        parts.append(f"-e DINOV3_URL_B64={packed}")
+        # The API accepts the raw url fine, but Vast renders env into shell
+        # context on the host; base64 keeps the CloudFront signature's &, =
+        # and ~ from being interpreted anywhere downstream.
+        env["DINOV3_URL_B64"] = base64.b64encode(
+            dinov3_url.strip().encode()).decode()
     if auth_user and auth_pass:
-        parts.append(f"-e RIG_AUTH_USER={auth_user}")
-        parts.append(f"-e RIG_AUTH_PASS={auth_pass}")
-    for k, v in (extra or {}).items():
-        parts.append(f"-e {k}={v}")
-    return " ".join(parts)
+        env["RIG_AUTH_USER"] = auth_user
+        env["RIG_AUTH_PASS"] = auth_pass
+    env.update(extra or {})
+    return env
 
 
 def build_onstart(repo=DEFAULT_REPO, branch=DEFAULT_BRANCH):

@@ -21,6 +21,12 @@ import urllib.request
 from rigkit import launch, state, tiers
 from rigkit.vast import Vast, VastError
 
+# Measured on a real run: ~14GB for torch + ComfyUI + the node stack, ~20GB of
+# weights, plus conversion scratch. 80GB leaves comfortable headroom for
+# outputs while keeping the storage line off the bill — at $0.33/GB/mo every
+# extra 40GB is another ~$0.018/hr whether you use it or not.
+DEFAULT_DISK_GB = 80
+
 
 # ---------------------------------------------------------------- formatting
 
@@ -52,7 +58,7 @@ def elapsed(seconds):
 def cmd_offers(args):
     vast = Vast()
     query = launch.build_query(args.tier, max_dph=args.max_price)
-    offers = launch.rank(vast.search_offers(query))
+    offers = launch.rank(vast.search_offers(query), disk_gb=args.disk)
     profile = tiers.resolve(args.tier)
 
     print(f"\ntier '{args.tier}' — {profile['blurb']}")
@@ -66,17 +72,22 @@ def cmd_offers(args):
 
     rows = []
     for o in offers[: args.limit]:
-        s = launch.summarize(o)
+        s = launch.summarize(o, disk_gb=args.disk)
         rows.append([
-            s["id"], s["gpu"], f"{s['vram_gb']}GB", money(s["dph"]) + "/hr",
-            f"{s['ram_gb']}GB", s["cpus"], f"{s['disk_gb']}GB",
+            s["id"], s["gpu"], f"{s['vram_gb']}GB",
+            money(s["dph"]) + "/hr", money(s["dph_gpu"]),
+            f"{s['ram_gb']}GB", s["cpus"],
             f"{s['down_mbps']}Mb", f"{s['reliability']}%", s["cuda"], s["where"],
         ])
-    print(table(rows, ["OFFER", "GPU", "VRAM", "PRICE", "RAM", "CPU",
-                       "DISK", "DOWN", "REL", "CUDA", "WHERE"]))
-    cheapest = launch.summarize(offers[0])
+    print(table(rows, ["OFFER", "GPU", "VRAM", "TOTAL", "GPU-ONLY", "RAM",
+                       "CPU", "DOWN", "REL", "CUDA", "WHERE"]))
+    cheapest = launch.summarize(offers[0], disk_gb=args.disk)
+    print(f"\n  TOTAL includes {args.disk}GB of storage — that is often ~half "
+          f"again the GPU price,")
+    print(f"  and storage_cost varies per host, so it changes the ranking.")
     print(f"\n  cheapest: offer {cheapest['id']} · {cheapest['gpu']} · "
-          f"{money(cheapest['dph'])}/hr  →  python rig.py up --tier {args.tier}")
+          f"{money(cheapest['dph'])}/hr all-in  →  "
+          f"python rig.py up --tier {args.tier}")
     return 0
 
 
@@ -93,21 +104,24 @@ def cmd_up(args):
         offer = offers[0]
     else:
         found = launch.rank(vast.search_offers(
-            launch.build_query(args.tier, max_dph=args.max_price)))
+            launch.build_query(args.tier, max_dph=args.max_price)),
+            disk_gb=args.disk)
         if not found:
             print("no offers matched — try --tier cheap or --max-price.")
             return 1
         offer = found[0]
 
-    s = launch.summarize(offer)
+    s = launch.summarize(offer, disk_gb=args.disk)
+    storage_dph = (s["dph"] or 0) - (s["dph_gpu"] or 0)
     monthly = (s["dph"] or 0) * 730
     print(f"\n  picking  offer {s['id']}")
     print(f"  gpu      {s['gpu']} · {s['vram_gb']}GB VRAM · {s['where']}")
     print(f"  host     {s['ram_gb']}GB RAM · {s['cpus']} cpu · "
           f"{s['down_mbps']}Mbit down · {s['reliability']}% reliable")
-    print(f"  price    {money(s['dph'])}/hr  (≈{money(monthly)}/mo if you forget "
-          f"to run `rig down`)")
-    print(f"  disk     {args.disk}GB")
+    print(f"  price    {money(s['dph'])}/hr all-in "
+          f"({money(s['dph_gpu'])} gpu + {money(storage_dph)} for "
+          f"{args.disk}GB disk)")
+    print(f"           ≈{money(monthly)}/mo if you forget to run `rig down`")
 
     if not args.yes:
         if input("\n  launch? [y/N] ").strip().lower() not in ("y", "yes"):
@@ -256,10 +270,28 @@ def cmd_logs(args):
     if not iid:
         print("no tracked instance.")
         return 1
+    seen = 0
     while True:
         try:
+            # The API doesn't return log text — it stages a file on S3 and
+            # hands back a URL, which lags the request by a few seconds.
             resp = vast.logs(iid, tail=args.tail)
-            print(resp.get("result_url") or resp)
+            url = resp.get("result_url")
+            if not url:
+                print(f"! unexpected logs response: {resp}")
+            else:
+                time.sleep(3)
+                try:
+                    with urllib.request.urlopen(url, timeout=30) as r:
+                        text = r.read().decode("utf-8", "replace")
+                    if args.follow:
+                        # only print what's new since last poll
+                        print(text[seen:], end="")
+                        seen = max(seen, len(text))
+                    else:
+                        print("\n".join(text.splitlines()[-args.tail:]))
+                except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+                    print(f"! log not staged yet ({exc}) — retrying")
         except VastError as exc:
             print(f"! {exc}")
         if not args.follow:
@@ -324,12 +356,15 @@ def main(argv=None):
     sp = sub.add_parser("offers", help="list cheapest matching offers")
     add_tier(sp)
     sp.add_argument("--limit", type=int, default=12)
+    sp.add_argument("--disk", type=int, default=DEFAULT_DISK_GB,
+                    help="price storage for this disk size (default: %(default)s GB)")
     sp.set_defaults(func=cmd_offers)
 
     sp = sub.add_parser("up", help="rent the cheapest offer and provision it")
     add_tier(sp)
     sp.add_argument("--offer", type=int, help="pin a specific offer id")
-    sp.add_argument("--disk", type=int, default=120, help="GB (default: %(default)s)")
+    sp.add_argument("--disk", type=int, default=DEFAULT_DISK_GB,
+                    help="GB (default: %(default)s)")
     sp.add_argument("--image", default=launch.DEFAULT_IMAGE)
     sp.add_argument("--branch", default=launch.DEFAULT_BRANCH,
                     help="repo branch the remote pulls provisioning from")

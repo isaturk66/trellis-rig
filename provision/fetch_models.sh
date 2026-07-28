@@ -10,8 +10,10 @@ PY="$COMFY_DIR/venv/bin/python"
 MODELS="$COMFY_DIR/ComfyUI/models"
 RIG_DIR="${RIG_DIR:-/opt/rig}"
 
-"$PIP" install -q "huggingface_hub[hf_transfer]"
-export HF_HUB_ENABLE_HF_TRANSFER=1
+# huggingface_hub 1.x dropped the hf_transfer extra and deprecated
+# HF_HUB_ENABLE_HF_TRANSFER (the accelerated backend is built in now), so
+# asking for either just prints warnings.
+"$PIP" install -q --upgrade huggingface_hub
 mkdir -p "$MODELS"
 
 # ---------------------------------------------------------------------------
