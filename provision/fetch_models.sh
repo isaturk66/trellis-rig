@@ -13,10 +13,11 @@ MODELS="$COMFY_DIR/ComfyUI/models"
 export HF_HUB_ENABLE_HF_TRANSFER=1
 
 if [ -z "${HF_TOKEN:-}" ]; then
-  echo "!! HF_TOKEN unset — the two gated repos below WILL fail:"
-  echo "     facebook/dinov3-vitl16-pretrain-lvd1689m"
-  echo "     briaai/RMBG-2.0"
-  echo "   request access on huggingface, then relaunch with HF_TOKEN set."
+  echo "!! HF_TOKEN unset — DINOv3 is gated and WILL fail to download."
+  echo "   It is the image encoder both TRELLIS.2 and Pixal3D condition on;"
+  echo "   without it the nodes raise on every prompt. Request access to"
+  echo "   facebook/dinov3-vitl16-pretrain-lvd1689m, then relaunch with"
+  echo "   HF_TOKEN set."
 fi
 
 mkdir -p "$MODELS"
@@ -30,10 +31,14 @@ MODELS = "/opt/comfy/ComfyUI/models"
 TOKEN = os.environ.get("HF_TOKEN") or None
 
 # (repo_id, local subdir, gated?)
+#
+# No RMBG-2.0 here on purpose: the official repo's app.py uses it for
+# background removal, but the ComfyUI node pack uses the ungated `rembg`
+# package instead (see its requirements.txt / `from rembg import remove`).
+# DINOv3 is the only genuinely gated dependency, and it is mandatory.
 REPOS = [
     ("facebook/dinov3-vitl16-pretrain-lvd1689m",
      "facebook/dinov3-vitl16-pretrain-lvd1689m", True),
-    ("briaai/RMBG-2.0", "briaai/RMBG-2.0", True),
     ("microsoft/TRELLIS.2-4B", "microsoft/TRELLIS.2-4B", False),
     ("TencentARC/Pixal3D-T", "TencentARC/Pixal3D-T", False),
 ]

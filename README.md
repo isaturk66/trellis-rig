@@ -31,11 +31,20 @@ Needs Python 3.9+ and a Vast.ai API key.
 
 Or use environment variables (`$env:VAST_API_KEY`, `$env:HF_TOKEN`).
 
-**Request HuggingFace access before your first launch** — two gated repos are
-required and approval is not instant:
+**Request HuggingFace access before your first launch.** Exactly one dependency
+is gated, and it is mandatory:
 
 - [`facebook/dinov3-vitl16-pretrain-lvd1689m`](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m)
-- [`briaai/RMBG-2.0`](https://huggingface.co/briaai/RMBG-2.0)
+
+DINOv3 is the image encoder both TRELLIS.2 and Pixal3D condition on — the thing
+that turns your input image into the features the flow models denoise against.
+There's no substitute and no fallback; the node raises on every prompt without
+it. Approval is a click-through but not always instant.
+
+Background removal does **not** need `briaai/RMBG-2.0` here. That's what the
+official repo's `app.py` uses; the ComfyUI node pack uses the ungated `rembg`
+package instead. Do run it though — background removal materially affects
+output quality ([TRELLIS.2#65](https://github.com/microsoft/TRELLIS.2/issues/65)).
 
 Without `HF_TOKEN` the box still comes up, but with no models.
 
