@@ -1,5 +1,6 @@
 """Offer search, ranking, instance creation, and URL resolution."""
 
+import base64
 import secrets
 import time
 
@@ -70,7 +71,8 @@ def summarize(offer):
 
 
 def build_env(hf_token=None, auth_user=None, auth_pass=None,
-              repo=DEFAULT_REPO, branch=DEFAULT_BRANCH, extra=None):
+              repo=DEFAULT_REPO, branch=DEFAULT_BRANCH, dinov3_url=None,
+              extra=None):
     """Vast wants docker-style flags in a single string.
 
     Secrets travel here at launch time from the local environment. They are
@@ -87,6 +89,11 @@ def build_env(hf_token=None, auth_user=None, auth_pass=None,
     ]
     if hf_token:
         parts.append(f"-e HF_TOKEN={hf_token}")
+    if dinov3_url:
+        # base64 so the CloudFront signature's &, = and ~ survive being packed
+        # into a space-separated docker-flag string.
+        packed = base64.b64encode(dinov3_url.strip().encode()).decode()
+        parts.append(f"-e DINOV3_URL_B64={packed}")
     if auth_user and auth_pass:
         parts.append(f"-e RIG_AUTH_USER={auth_user}")
         parts.append(f"-e RIG_AUTH_PASS={auth_pass}")
@@ -119,7 +126,8 @@ def make_credentials():
 
 
 def create(vast, offer, disk_gb=120, image=DEFAULT_IMAGE, label="trellis-rig",
-           hf_token=None, auth=True, repo=DEFAULT_REPO, branch=DEFAULT_BRANCH):
+           hf_token=None, auth=True, repo=DEFAULT_REPO, branch=DEFAULT_BRANCH,
+           dinov3_url=None):
     auth_user, auth_pass = make_credentials() if auth else (None, None)
     body = {
         "client_id": "me",
@@ -129,7 +137,8 @@ def create(vast, offer, disk_gb=120, image=DEFAULT_IMAGE, label="trellis-rig",
         "runtype": "ssh",
         "target_state": "running",
         "cancel_unavail": True,
-        "env": build_env(hf_token, auth_user, auth_pass, repo, branch),
+        "env": build_env(hf_token, auth_user, auth_pass, repo, branch,
+                         dinov3_url),
         "onstart": build_onstart(repo, branch),
     }
     resp = vast.create_instance(offer["id"], body)

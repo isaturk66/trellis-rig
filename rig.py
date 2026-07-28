@@ -115,10 +115,16 @@ def cmd_up(args):
             return 1
 
     hf_token = os.environ.get("HF_TOKEN", "").strip() or None
-    if not hf_token:
-        print("\n  ! HF_TOKEN not set — DINOv3 and RMBG-2.0 are gated and the")
-        print("    bootstrap will stall on them. Set it and relaunch, or the")
-        print("    box will come up with ComfyUI but no models.")
+    dinov3_url = os.environ.get("DINOV3_URL", "").strip() or None
+    if dinov3_url:
+        print(f"  dinov3   Meta CDN url present — will convert to HF format")
+    elif hf_token:
+        print(f"  dinov3   via HF token (needs approved gated access)")
+    else:
+        print("\n  ! No DINOv3 source. It is the image encoder both models")
+        print("    condition on, and every generation will raise without it.")
+        print("    Set HF_TOKEN (approved gated access) or DINOV3_URL")
+        print("    (signed dinov3.llamameta.net link) and relaunch.")
 
     instance_id, creds = launch.create(
         vast, offer,
@@ -127,6 +133,7 @@ def cmd_up(args):
         hf_token=hf_token,
         auth=not args.no_auth,
         branch=args.branch,
+        dinov3_url=dinov3_url,
     )
     rec = state.record_launch(instance_id, offer, {
         "tier": args.tier, **creds,
