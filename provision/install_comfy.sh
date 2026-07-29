@@ -23,10 +23,13 @@ fi
 "$PIP" install --upgrade pip wheel setuptools -q
 
 echo "--- torch ${TORCH_VERSION} (cu128)"
-# No torchaudio on purpose. Nothing here needs it, and transformers imports it
-# eagerly via loss_rnnt — so if its CUDA build ever drifts from torch's, every
-# `from transformers import ...` dies with a version-mismatch RuntimeError.
-"$PIP" install -q "torch==${TORCH_VERSION}" torchvision \
+# torchaudio is installed deliberately even though nothing here uses it:
+# ComfyUI's requirements.txt depends on it, and transformers imports it
+# eagerly via loss_rnnt. Leave it out and pip satisfies ComfyUI from PyPI with
+# a CUDA 13 build, which then fails to dlopen libcudart.so.13 and takes down
+# every `from transformers import ...`. Pulling it from the cu128 index here,
+# and pinning it below, is what keeps the three in lockstep.
+"$PIP" install -q "torch==${TORCH_VERSION}" torchvision torchaudio \
   --index-url "$TORCH_INDEX"
 
 # Freeze the torch stack. Any later `pip install --upgrade <anything that
@@ -35,7 +38,7 @@ echo "--- torch ${TORCH_VERSION} (cu128)"
 # impossible rather than merely unlikely.
 "$PY" - > "$CONSTRAINTS" <<'PYPIN'
 import importlib.metadata as md
-for pkg in ("torch", "torchvision"):
+for pkg in ("torch", "torchvision", "torchaudio"):
     try:
         print(f"{pkg}=={md.version(pkg)}")
     except md.PackageNotFoundError:
@@ -95,7 +98,12 @@ if torch.cuda.is_available():
     if cap[0] < 8:
         print("    !! CC < 8.0 — bf16 unsupported, flow models will fail")
 bad = []
-for mod in ("cumesh", "o_voxel", "flex_gemm", "nvdiffrast", "trimesh"):
+# `transformers` is the canary for CUDA drift across the torch stack: it
+# eagerly imports torchaudio, so a torchaudio built for a different CUDA than
+# torch surfaces right here instead of 10 minutes later in the converter, or
+# worse, as a ComfyUI that silently never binds its port.
+for mod in ("cumesh", "o_voxel", "flex_gemm", "nvdiffrast", "trimesh",
+            "transformers"):
     try:
         __import__(mod)
         print(f"    ok   {mod}")
