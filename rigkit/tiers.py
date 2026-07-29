@@ -59,7 +59,10 @@ DEFAULT_TIER = "mid"
 # offer on Vast is frequently a 50 Mbit box with 92% uptime — useless when the
 # bootstrap pulls ~25GB of weights and the job runs for an hour.
 QUALITY_FLOOR = {
-    "min_reliability": 0.98,
+    # A 98.4% host dropped to `offline` 20 minutes into provisioning and kept
+    # billing. Over a ~40min provision the tail of this distribution is where
+    # the wasted money lives, so the floor is deliberately tight.
+    "min_reliability": 0.995,
     # Provisioning is almost entirely download: ~5GB of torch wheels plus
     # ~20GB of weights. Measured across three live runs, this single number
     # dominates everything else — installing torch took 4 min on a 924Mbit
