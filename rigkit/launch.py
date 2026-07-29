@@ -3,6 +3,7 @@
 import base64
 import secrets
 import time
+import urllib.request
 
 from . import tiers
 
@@ -130,14 +131,33 @@ def build_env(hf_token=None, auth_user=None, auth_pass=None,
     return env
 
 
-def build_onstart(repo=DEFAULT_REPO, branch=DEFAULT_BRANCH):
+def resolve_ref(repo=DEFAULT_REPO, branch=DEFAULT_BRANCH):
+    """Resolve a branch to its current commit SHA on GitHub.
+
+    Branch-named raw.githubusercontent.com URLs are CDN-cached for minutes, so
+    `git push && rig up` can silently provision the PREVIOUS commit — which
+    burned a full launch here, debugging a fix that was never running. Commit
+    SHAs are immutable and served fresh, and they also pin exactly which code
+    built any given box.
+    """
+    owner_repo = repo.rstrip("/").split("github.com/")[-1]
+    api = f"https://api.github.com/repos/{owner_repo}/commits/{branch}"
+    req = urllib.request.Request(api, headers={
+        "Accept": "application/vnd.github.sha",
+        "User-Agent": "trellis-rig",
+    })
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return resp.read().decode().strip()
+
+
+def build_onstart(repo=DEFAULT_REPO, branch=DEFAULT_BRANCH, ref=None):
     """Tiny bootstrap: pull the real provisioning script from the public repo.
 
     Keeping this one line means iterating on provisioning is a git push, not a
     CLI change or a rebuilt image.
     """
     raw = repo.replace("github.com", "raw.githubusercontent.com").rstrip("/")
-    url = f"{raw}/{branch}/provision/bootstrap.sh"
+    url = f"{raw}/{ref or branch}/provision/bootstrap.sh"
     return (
         "set -o pipefail; "
         "export DEBIAN_FRONTEND=noninteractive; "
@@ -155,7 +175,7 @@ def make_credentials():
 
 def create(vast, offer, disk_gb=120, image=DEFAULT_IMAGE, label="trellis-rig",
            hf_token=None, auth=True, repo=DEFAULT_REPO, branch=DEFAULT_BRANCH,
-           dinov3_url=None):
+           dinov3_url=None, ref=None):
     auth_user, auth_pass = make_credentials() if auth else (None, None)
     body = {
         "client_id": "me",
@@ -165,9 +185,9 @@ def create(vast, offer, disk_gb=120, image=DEFAULT_IMAGE, label="trellis-rig",
         "runtype": "ssh",
         "target_state": "running",
         "cancel_unavail": True,
-        "env": build_env(hf_token, auth_user, auth_pass, repo, branch,
+        "env": build_env(hf_token, auth_user, auth_pass, repo, ref or branch,
                          dinov3_url),
-        "onstart": build_onstart(repo, branch),
+        "onstart": build_onstart(repo, branch, ref),
     }
     resp = vast.create_instance(offer["id"], body)
     instance_id = resp.get("new_contract") or resp.get("id")

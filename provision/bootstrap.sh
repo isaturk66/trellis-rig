@@ -38,7 +38,13 @@ apt-get install -y -qq --no-install-recommends \
 
 phase "fetch rig repo (${RIG_BRANCH})"
 rm -rf "$RIG_DIR"
-git clone --depth 1 --branch "$RIG_BRANCH" "$RIG_REPO" "$RIG_DIR" || die "git clone rig"
+# RIG_BRANCH carries a commit sha when the launcher pinned one; --depth 1
+# --branch only accepts a name or tag, so fall back to a full clone + checkout.
+if ! git clone --depth 1 --branch "$RIG_BRANCH" "$RIG_REPO" "$RIG_DIR" 2>/dev/null; then
+  git clone "$RIG_REPO" "$RIG_DIR" || die "git clone rig"
+  git -C "$RIG_DIR" checkout --detach "$RIG_BRANCH" || die "checkout $RIG_BRANCH"
+fi
+echo "    provisioning from $(git -C "$RIG_DIR" rev-parse --short HEAD)"
 chmod +x "$RIG_DIR"/provision/*.sh
 
 phase "install comfyui + trellis2 nodes"

@@ -128,6 +128,15 @@ def cmd_up(args):
             print("  aborted.")
             return 1
 
+    try:
+        ref = launch.resolve_ref(branch=args.branch)
+        print(f"  code     {args.branch} @ {ref[:9]} (pinned — raw.github "
+              f"caches branch urls for minutes)")
+    except Exception as exc:
+        print(f"  ! could not resolve {args.branch} to a sha ({exc}); falling "
+              f"back to the branch name, which may serve stale provisioning")
+        ref = None
+
     hf_token = os.environ.get("HF_TOKEN", "").strip() or None
     dinov3_url = os.environ.get("DINOV3_URL", "").strip() or None
     if dinov3_url:
@@ -148,6 +157,7 @@ def cmd_up(args):
         auth=not args.no_auth,
         branch=args.branch,
         dinov3_url=dinov3_url,
+        ref=ref,
     )
     rec = state.record_launch(instance_id, offer, {
         "tier": args.tier, **creds,
