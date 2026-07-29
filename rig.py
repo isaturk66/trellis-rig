@@ -139,10 +139,14 @@ def cmd_up(args):
 
     hf_token = os.environ.get("HF_TOKEN", "").strip() or None
     dinov3_url = os.environ.get("DINOV3_URL", "").strip() or None
-    if dinov3_url:
-        print(f"  dinov3   Meta CDN url present — will convert to HF format")
+    # Mirror the precedence fetch_models.sh actually uses: HF first, CDN as
+    # the backstop. Reporting them the other way round is just confusing.
+    if hf_token and dinov3_url:
+        print(f"  dinov3   HF token (primary) + Meta CDN url (fallback)")
     elif hf_token:
         print(f"  dinov3   via HF token (needs approved gated access)")
+    elif dinov3_url:
+        print(f"  dinov3   Meta CDN url — will convert to HF format")
     else:
         print("\n  ! No DINOv3 source. It is the image encoder both models")
         print("    condition on, and every generation will raise without it.")

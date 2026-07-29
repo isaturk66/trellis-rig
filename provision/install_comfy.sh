@@ -12,6 +12,13 @@ CONSTRAINTS="$COMFY_DIR/constraints.txt"
 
 # Must match the wheels/Linux/<TorchXXX> directory we install from.
 TORCH_VERSION="${TORCH_VERSION:-2.9.1}"
+# Pin the companions explicitly. Leaving torchaudio to the resolver got
+# 2.11.0 alongside torch 2.9.1 — same index, no error, but built against a
+# different libtorch ABI, so ComfyUI died on
+# `_torchaudio.abi3.so: undefined symbol: torch_library_impl`. torchaudio
+# tracks torch's minor version; torchvision runs one major behind.
+TORCHVISION_VERSION="${TORCHVISION_VERSION:-0.24.1}"
+TORCHAUDIO_VERSION="${TORCHAUDIO_VERSION:-2.9.1}"
 TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu128}"
 WHEEL_DIR_NAME="${WHEEL_DIR_NAME:-Torch291}"
 
@@ -29,7 +36,10 @@ echo "--- torch ${TORCH_VERSION} (cu128)"
 # a CUDA 13 build, which then fails to dlopen libcudart.so.13 and takes down
 # every `from transformers import ...`. Pulling it from the cu128 index here,
 # and pinning it below, is what keeps the three in lockstep.
-"$PIP" install -q "torch==${TORCH_VERSION}" torchvision torchaudio \
+"$PIP" install -q \
+  "torch==${TORCH_VERSION}" \
+  "torchvision==${TORCHVISION_VERSION}" \
+  "torchaudio==${TORCHAUDIO_VERSION}" \
   --index-url "$TORCH_INDEX"
 
 # Freeze the torch stack. Any later `pip install --upgrade <anything that
@@ -98,12 +108,13 @@ if torch.cuda.is_available():
     if cap[0] < 8:
         print("    !! CC < 8.0 — bf16 unsupported, flow models will fail")
 bad = []
-# `transformers` is the canary for CUDA drift across the torch stack: it
-# eagerly imports torchaudio, so a torchaudio built for a different CUDA than
-# torch surfaces right here instead of 10 minutes later in the converter, or
-# worse, as a ComfyUI that silently never binds its port.
+# torchaudio is imported DIRECTLY, not via transformers. transformers swallows
+# the failure, so it once reported "ok" while the same torchaudio was busy
+# killing ComfyUI with `undefined symbol: torch_library_impl`. ComfyUI imports
+# it unconditionally (comfy/ldm/lightricks/vae/audio_vae.py), so loading its
+# native .so here is the honest test of whether the stack agrees.
 for mod in ("cumesh", "o_voxel", "flex_gemm", "nvdiffrast", "trimesh",
-            "transformers"):
+            "torchaudio", "transformers"):
     try:
         __import__(mod)
         print(f"    ok   {mod}")
@@ -113,6 +124,17 @@ for mod in ("cumesh", "o_voxel", "flex_gemm", "nvdiffrast", "trimesh",
 if bad:
     # Fail loudly here rather than at the first prompt 20 minutes later.
     raise SystemExit(f"unusable install, broken imports: {', '.join(bad)}")
+
+# Belt and braces: a torchaudio whose minor version leads torch's is an ABI
+# landmine even when the import happens to succeed on this machine.
+import torchaudio
+tv = torch.__version__.split("+")[0].rsplit(".", 1)[0]
+av = torchaudio.__version__.split("+")[0].rsplit(".", 1)[0]
+print(f"    torch {torch.__version__} / torchaudio {torchaudio.__version__}")
+if tv != av:
+    raise SystemExit(
+        f"torch/torchaudio minor mismatch ({tv} vs {av}) — pin "
+        f"TORCHAUDIO_VERSION to match TORCH_VERSION")
 PYCHECK
 
 echo "--- workflows"
