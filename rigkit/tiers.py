@@ -72,6 +72,21 @@ QUALITY_FLOOR = {
 }
 
 
+# Advertised link speed says nothing about the route to huggingface.co, and
+# provisioning is ~20GB of HF traffic. Measured: an Argentina host on 924Mbit
+# pulled the lot in 7 minutes; a Shanghai host advertising 1275Mbit managed
+# ~33Mbit and then stalled outright at 27GB. Excluded by default rather than
+# by preference, because the failure mode is an idle GPU billing by the hour.
+SLOW_TO_HUGGINGFACE = ("CN",)
+
+
+def excluded_region(offer, blocked=SLOW_TO_HUGGINGFACE):
+    geo = (offer.get("geolocation") or "").strip()
+    # geolocation looks like "Shanghai, CN" or ", CA" — the country is last.
+    country = geo.rsplit(",", 1)[-1].strip().upper()
+    return country in blocked
+
+
 def tier_names():
     return list(TIERS.keys())
 

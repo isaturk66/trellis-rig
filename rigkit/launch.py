@@ -69,8 +69,10 @@ def effective_dph(offer, disk_gb):
     return base + storage
 
 
-def rank(offers, disk_gb=None):
+def rank(offers, disk_gb=None, skip_slow_regions=True):
     """Cheapest first, priced for the disk we intend to request."""
+    if skip_slow_regions:
+        offers = [o for o in offers if not tiers.excluded_region(o)]
     if disk_gb is None:
         return sorted(offers, key=lambda o: (o.get("dph_total") or 9e9))
     return sorted(offers, key=lambda o: effective_dph(o, disk_gb))
