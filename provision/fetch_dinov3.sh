@@ -22,7 +22,9 @@ PY="$COMFY_DIR/venv/bin/python"
 PIP="$COMFY_DIR/venv/bin/pip"
 MODELS="$COMFY_DIR/ComfyUI/models"
 DEST="$MODELS/facebook/dinov3-vitl16-pretrain-lvd1689m"
-WORK=/tmp/dinov3
+# Under TMPDIR (set by bootstrap to the big overlay), never /tmp — the
+# checkpoint alone is 1.2GB and some hosts give /tmp a tiny tmpfs.
+WORK="${TMPDIR:-/tmp}/dinov3"
 PTH="$WORK/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth"
 
 if [ -f "$DEST/model.safetensors" ]; then
@@ -73,12 +75,13 @@ done
 
 echo "--- converting (includes numerical verification against reference outputs)"
 cd "$WORK"
-DINOV3_LOCAL_PTH="$PTH" DINOV3_SAVE_ROOT="$WORK/out" "$PY" - <<'PYCONV'
+DINOV3_LOCAL_PTH="$PTH" DINOV3_SAVE_ROOT="$WORK/out" DINOV3_WORK="$WORK" \
+"$PY" - <<'PYCONV'
 import argparse
 import os
 import sys
 
-sys.path.insert(0, "/tmp/dinov3")
+sys.path.insert(0, os.environ["DINOV3_WORK"])
 import convert_dinov3_vit_to_hf as conv
 
 local = os.environ["DINOV3_LOCAL_PTH"]

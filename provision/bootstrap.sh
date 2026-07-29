@@ -15,6 +15,17 @@ exec > >(tee -a "$LOG_DIR/bootstrap.log") 2>&1
 phase() { echo -e "\n=== [$(date -u +%H:%M:%S)] $* ==="; echo "$*" > "$LOG_DIR/phase"; }
 die()   { echo "!! FAILED: $*"; echo "$*" > "$LOG_DIR/failed"; exit 1; }
 
+# Keep every large temporary off /tmp. On some hosts /tmp is a small tmpfs
+# rather than part of the big overlay, and pip streams wheel downloads through
+# TMPDIR — so a 2.5GB torch wheel dies with "No space left on device" while
+# `df` still shows 80GB free. Exported so all child scripts inherit it.
+export TMPDIR=/opt/rig-tmp
+export PIP_CACHE_DIR=/opt/rig-tmp/pip-cache
+mkdir -p "$TMPDIR" "$PIP_CACHE_DIR"
+
+echo "disk layout at start:"
+df -h / /tmp /opt 2>/dev/null | sed 's/^/  /'
+
 phase "system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
