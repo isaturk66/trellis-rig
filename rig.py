@@ -299,6 +299,53 @@ def cmd_logs(args):
         time.sleep(args.interval)
 
 
+def cmd_stop(args):
+    """Suspend without losing the ~35GB of provisioned state."""
+    vast = Vast()
+    rec = state.current()
+    iid = args.id or (rec or {}).get("instance_id")
+    if not iid:
+        print("no tracked instance.")
+        return 1
+    inst = vast.instance(iid)
+    gpu_dph = inst.get("dph_base") or 0
+    store_dph = (inst.get("storage_total_cost") or 0)
+    vast.set_state(iid, "stopped")
+    print(f"\n  stopped {iid}. disk kept, so `rig start` skips provisioning.")
+    print(f"  billing drops {money(inst.get('dph_total'))}/hr → "
+          f"{money(store_dph)}/hr (storage only)")
+    if store_dph:
+        breakeven = 0.5 / store_dph  # a fresh provision costs ~30min of GPU
+        print(f"  cheaper than destroy+reprovision if you're back within "
+              f"~{breakeven:.0f}h; otherwise `rig down`.")
+    print(f"  (gpu portion {money(gpu_dph)}/hr is not billed while stopped)\n")
+    return 0
+
+
+def cmd_start(args):
+    vast = Vast()
+    rec = state.current()
+    iid = args.id or (rec or {}).get("instance_id")
+    if not iid:
+        print("no tracked instance.")
+        return 1
+    vast.set_state(iid, "running")
+    print(f"  starting {iid} — waiting for ports...")
+    inst = launch.wait_running(vast, iid, timeout=args.timeout)
+    url = launch.public_url(inst, launch.PROXY_PORT,
+                            (rec or {}).get("auth_user"),
+                            (rec or {}).get("auth_pass"))
+    # Vast re-runs onstart when a stopped instance restarts, and bootstrap is
+    # written to be re-entrant — the venv, both clones and every model are
+    # skipped when already present, so this settles in a couple of minutes
+    # rather than the full provision. Poll rather than assume.
+    print(f"\n  running. bootstrap re-runs but skips everything already on "
+          f"disk — give it a few minutes, then:")
+    print(f"    python rig.py ready")
+    print(f"  URL: {url}\n")
+    return 0
+
+
 def cmd_down(args):
     vast = Vast()
     live = vast.instances()
@@ -393,6 +440,15 @@ def main(argv=None):
     sp.add_argument("--follow", action="store_true")
     sp.add_argument("--interval", type=int, default=15)
     sp.set_defaults(func=cmd_logs)
+
+    sp = sub.add_parser("stop", help="suspend, keeping the provisioned disk")
+    sp.add_argument("--id", type=int)
+    sp.set_defaults(func=cmd_stop)
+
+    sp = sub.add_parser("start", help="resume a stopped instance")
+    sp.add_argument("--id", type=int)
+    sp.add_argument("--timeout", type=int, default=900)
+    sp.set_defaults(func=cmd_start)
 
     sp = sub.add_parser("down", help="destroy instance(s) and stop billing")
     sp.add_argument("--id", type=int)

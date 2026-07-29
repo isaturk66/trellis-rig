@@ -60,7 +60,12 @@ DEFAULT_TIER = "mid"
 # bootstrap pulls ~25GB of weights and the job runs for an hour.
 QUALITY_FLOOR = {
     "min_reliability": 0.98,
-    "min_inet_down_mbps": 200,
+    # Provisioning is almost entirely download: ~5GB of torch wheels plus
+    # ~20GB of weights. Measured across three live runs, this single number
+    # dominates everything else — installing torch took 4 min on a 924Mbit
+    # host and 23 min on a 624Mbit one. Paying $0.02/hr more for a fast host
+    # is far cheaper than idling a GPU through a slow download.
+    "min_inet_down_mbps": 800,
     "min_disk_gb": 100,
     "min_cuda": 12.4,   # TRELLIS.2 needs >= 12.4; the common 12.2 default fails
     "min_direct_ports": 2,

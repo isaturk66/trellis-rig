@@ -96,6 +96,17 @@ class Vast:
     def destroy(self, instance_id):
         return self._request("DELETE", f"/instances/{instance_id}/")
 
+    def set_state(self, instance_id, state):
+        """stopped | running.
+
+        Stopping keeps the disk — and therefore the whole provisioned stack,
+        weights included — so a restart skips the 20-40min bootstrap entirely.
+        You still pay storage while stopped, so it beats destroy only when
+        you'll be back before the storage cost exceeds a fresh provision.
+        """
+        return self._request("PUT", f"/instances/{instance_id}/",
+                             {"state": state})
+
     def logs(self, instance_id, tail=200):
         return self._request(
             "PUT", f"/instances/request_logs/{instance_id}/", {"tail": str(tail)}
