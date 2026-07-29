@@ -140,6 +140,34 @@ Debug endpoints on the running box:
 
 ---
 
+## Validated
+
+End-to-end on an RTX 3090, 2026-07-29. **~11 min** from `rig up` to a serving
+URL on a fast host:
+
+```
+unauthenticated GET /   -> 401   proxy is gating
+/rig/health             -> 200   2026-07-29T04:45:58Z
+authenticated GET /     -> 200   <title>ComfyUI</title>
+/system_stats           -> 200   comfyui 0.29.0, RTX 3090, 25GB vram
+/object_info            -> 200   890 nodes, 71 of them Trellis2/Pixal3D
+```
+
+Models on disk: 39GB. DINOv3 pulled from the gated HF repo in 32s with a token.
+
+First workflow: drop `Trellis2LoadModel` and pick a model —
+
+```
+modelname     microsoft/TRELLIS.2-4B | visualbruno/TRELLIS.2-4B-FP8 | TencentARC/Pixal3D-T
+backend       flash_attn | xformers | sdpa | flash_attn_3
+conv_backend  spconv | torchsparse | flex_gemm
+low_vram      default True
+```
+
+then `Trellis2PreProcessImage` → `Trellis2MeshWithVoxelGenerator`
+(`pipeline_type`: 512 / 1024 / 1024_cascade / 1536_cascade). The 19 bundled
+example workflows are already in the UI's workflow list.
+
 ## Quality notes
 
 Defaults worth knowing when you get to the UI:
